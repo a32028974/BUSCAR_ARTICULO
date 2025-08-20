@@ -1,5 +1,5 @@
 // === CONFIG ===
-const API = 'https://script.google.com/macros/s/AKfycby6SzAgXhtctDbYEGETB6Ku8X_atugp7Mld5QvimnDpXMmHU9IxW9XRqDkRI0rGONr85Q/exec'; // <-- pegá acá tu Web App URL. Ej: https://script.google.com/macros/s/AKfy....../exec
+const API = 'https://script.google.com/macros/s/AKfycbwqmOI-R_htTcfnaFrdI8943665CCLHYWr29GiSTw8qaAwzyXsKx4WXpJ2WtqQVWTq5IQ/exec'; // <-- pegá acá tu Web App URL. Ej: https://script.google.com/macros/s/AKfy....../exec
 const CACHE_KEY = 'stock_cache_v1';
 const CACHE_TTL_MIN = 15; // minutos
 
