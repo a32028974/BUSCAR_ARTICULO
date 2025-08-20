@@ -175,7 +175,13 @@ function setCache(data){
   localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
 }
 
-// === FETCH ===
+function normHeader(h){
+  return String(h||'')
+    .trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // saca tildes
+    .toUpperCase();
+}
+
 async function fetchAll(){
   $('#spinner').hidden = false;
   setStatus('Cargando…');
@@ -184,23 +190,19 @@ async function fetchAll(){
     if (!res.ok) throw new Error('HTTP '+res.status);
     const json = await res.json();
 
-    // Tu Apps Script retorna { ok, headers, rows, ... }
     let rows = [];
-    if (Array.isArray(json)) {
-      // caso antiguo (no aplica acá), pero lo tolero
-      rows = json;
-    } else if (json && Array.isArray(json.rows)) {
-      const headers = json.headers || [];
-      // rows = array de objetos con claves EXACTAS de encabezado; mapeo a las claves internas
-      rows = json.rows.map(r => {
+    if (json && Array.isArray(json.rows)) {
+      // mapeo headers del server -> claves internas
+      rows = json.rows.map(r=>{
         const o = {};
-        // cada r ya viene como objeto { 'N ANTEOJO':..., 'MARCA': ... }
-        Object.keys(r).forEach(h => {
-          const key = MAP[h?.toString().trim().toUpperCase()];
+        Object.keys(r).forEach(h=>{
+          const key = MAP[normHeader(h)] || MAP[h] || null;
           if (key) o[key] = r[h];
         });
         return o;
       });
+    } else if (Array.isArray(json)) {
+      rows = json; // por compatibilidad
     } else {
       throw new Error('Forma de respuesta inesperada');
     }
@@ -213,17 +215,14 @@ async function fetchAll(){
     console.error('fetchAll error:', e);
     setStatus('Error al cargar. Uso copia local si existe.', 'var(--danger)');
     const cached = getCache();
-    if (cached){
-      DATA = cached.data;
-      setLastSync(cached.ts);
-    }else{
-      DATA = [];
-    }
+    DATA = cached ? cached.data : [];
+    if (cached) setLastSync(cached.ts);
   }finally{
     $('#spinner').hidden = true;
     filterRows();
   }
 }
+
 
 
 // === INIT ===
