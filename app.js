@@ -70,6 +70,17 @@ function normHeader(h){
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // sin tildes
     .toUpperCase();
 }
+// --- CONTROL DE CARGA (evita spinner pegado) ---
+let LOADING = 0;
+function setLoading(on){
+  LOADING = Math.max(0, LOADING + (on ? 1 : -1));
+  const sp = document.getElementById('spinner');
+  if (sp) sp.hidden = (LOADING === 0);
+}
+// por si algo falla en background, auto-ocultá a los 12s
+function loadingFailsafe(){
+  setTimeout(()=>{ LOADING = 0; const sp = document.getElementById('spinner'); if (sp) sp.hidden = true; }, 12000);
+}
 
 // === ESTADO ===
 let DATA = [];
@@ -134,6 +145,7 @@ function sortRows(rows, key, dir='asc'){
 
 // === FILTRO ===
 function filterRows(){
+  setLoading(false); // si quedó pegado, lo baja
   const q = $('#q').value.trim().toLowerCase();
   const fam = $('#familia').value;
   const estado = $('#estadoVenta').value; // DISPONIBLE / VENDIDO
@@ -184,8 +196,10 @@ function clearCacheAndReload(){
 
 // === FETCH ===
 async function fetchAll(){
-  $('#spinner').hidden = false;
-  setStatus('Cargando…');
+  setLoading(true);
+setStatus('Cargando…');
+loadingFailsafe();
+
   try{
     const res = await fetch(`${API}?todos=true`, { method:'GET' });
     if (!res.ok) throw new Error('HTTP '+res.status);
@@ -242,8 +256,9 @@ async function fetchAll(){
       DATA = [];
     }
   }finally{
-    $('#spinner').hidden = true;
-    filterRows();
+    setLoading(false);
+filterRows();
+
   }
 }
 
