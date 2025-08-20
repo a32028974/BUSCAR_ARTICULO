@@ -1,6 +1,6 @@
 // === CONFIG ===
 const API = 'https://script.google.com/macros/s/AKfycbwqmOI-R_htTcfnaFrdI8943665CCLHYWr29GiSTw8qaAwzyXsKx4WXpJ2WtqQVWTq5IQ/exec';
-const CACHE_KEY = 'stock_cache_v7';
+const CACHE_KEY = 'stock_cache_v8';
 const CACHE_TTL_MIN = 15; // minutos
 
 // Traduce encabezados del Sheet a claves internas
@@ -54,6 +54,34 @@ function setStatus(msg, color){ const el=$('#status'); if (!el) return; el.textC
 function setLastSync(ts){ const el=$('#lastSync'); if(!el) return; el.textContent = ts ? `Actualizado: ${new Date(ts).toLocaleString('es-AR')}` : ''; }
 function normHeader(h){ return String(h||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase(); }
 function norm(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// --- Resaltado tolerante a tildes ---
+function tokenToRegexFrag(t){
+  return esc(t)
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/a/gi, '[aáàäâã]')
+    .replace(/e/gi, '[eéèêë]')
+    .replace(/i/gi, '[iíïìî]')
+    .replace(/o/gi, '[oóòôöõ]')
+    .replace(/u/gi, '[uúùûü]')
+    .replace(/n/gi, '[nñ]')
+    .replace(/c/gi, '[cç]');
+}
+function highlightText(str, tokensRaw){
+  if (str == null || str === '') return '';
+  let s = String(str);
+  const toks = (tokensRaw||[]).map(t=>String(t).trim()).filter(Boolean);
+  if (!toks.length) return esc(s);
+  toks.sort((a,b)=>b.length-a.length);
+  for (const t of toks){
+    const frag = tokenToRegexFrag(t);
+    const re = new RegExp(`(${frag})`, 'gi');
+    s = s.replace(re, '\u0001$1\u0002');
+  }
+  s = esc(s).replace(/\u0001/g, '<span class="hl">').replace(/\u0002/g, '</span>');
+  return s;
+}
 
 // --- CONTROL DE CARGA (spinner sólido) ---
 let LOADING = 0;
@@ -80,7 +108,7 @@ function buildIndex(arr){
 }
 
 // === RENDER ===
-function render(rows){
+function render(rows, tokensRaw){
   const tbody = $('#tbody');
   tbody.innerHTML = '';
   if (!rows.length){
@@ -96,18 +124,18 @@ function render(rows){
   rows.forEach(r=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${r.n_anteojo ?? ''}</td>
-      <td>${r.marca ?? ''}</td>
-      <td>${r.modelo ?? ''}</td>
-      <td>${r.color ?? ''}</td>
-      <td>${r.familia ?? ''}</td>
-      <td>${r.cristal_color ?? ''}</td>
-      <td>${r.calibre ?? ''}</td>
-      <td>${formatMoney(r.precio)}</td>
-      <td>${formatShortDate(r.fecha_ingreso)}</td>
-      <td>${formatShortDate(r.fecha_venta)}</td>
-      <td>${r.vendedor ?? ''}</td>
-      <td>${r.codigo_barras ?? ''}</td>
+      <td>${highlightText(r.n_anteojo, tokensRaw)}</td>
+      <td>${highlightText(r.marca, tokensRaw)}</td>
+      <td>${highlightText(r.modelo, tokensRaw)}</td>
+      <td>${highlightText(r.color, tokensRaw)}</td>
+      <td>${highlightText(r.familia, tokensRaw)}</td>
+      <td>${highlightText(r.cristal_color, tokensRaw)}</td>
+      <td>${highlightText(r.calibre, tokensRaw)}</td>
+      <td>${highlightText(formatMoney(r.precio), tokensRaw)}</td>
+      <td>${highlightText(formatShortDate(r.fecha_ingreso), tokensRaw)}</td>
+      <td>${highlightText(formatShortDate(r.fecha_venta), tokensRaw)}</td>
+      <td>${highlightText(r.vendedor, tokensRaw)}</td>
+      <td>${highlightText(r.codigo_barras, tokensRaw)}</td>
     `;
     frag.appendChild(tr);
   });
@@ -137,15 +165,17 @@ function sortRows(rows, key, dir='asc'){
 
 // === FILTRO ===
 function filterRows(){
-  hideSpinnerNow(); // si quedó pegado por un fetch en background
+  hideSpinnerNow();
   const q = $('#q').value.trim();
   const fam = $('#familia').value;
   const estado = $('#estadoVenta').value;
 
   let rows = DATA;
+  let tokensRaw = [];
 
   if (q){
-    const tokens = q.split(/\s+/).map(norm).filter(Boolean);
+    tokensRaw = q.split(/\s+/).filter(Boolean);
+    const tokens = tokensRaw.map(norm);
     if (tokens.length){
       rows = rows.filter(r=>{
         const hay = r.__q || (r.__q = norm([r.n_anteojo, r.marca, r.modelo, r.color, r.familia, r.cristal_color, r.calibre, r.codigo_barras].join(' ')));
@@ -161,7 +191,7 @@ function filterRows(){
   }
 
   rows = sortRows(rows, sortKey, sortDir);
-  render(rows);
+  render(rows, tokensRaw);
 }
 
 // === CACHE ===
@@ -227,7 +257,7 @@ async function fetchAll(){
     console.error('fetchAll error:', e);
     setStatus('Error al cargar. Uso copia local si existe.', 'var(--danger)');
     const cached = getCache();
-    if (cached){ DATA = cached.data; setLastSync(cached.ts); } else { DATA = []; }
+    if (cached){ DATA = cached.data; buildIndex(DATA); setLastSync(cached.ts); } else { DATA = []; }
   }finally{
     FETCHING = false;
     setLoading(false);
