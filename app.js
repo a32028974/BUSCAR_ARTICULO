@@ -1,5 +1,5 @@
 /* ===== Versión (debe coincidir con index.html) ===== */
-const APP_VERSION = '2025-08-20_12-00';
+const APP_VERSION = '2025-08-20_11-05';
 
 // Limpieza automática de cachés locales si cambió la versión
 (() => {
@@ -12,7 +12,7 @@ const APP_VERSION = '2025-08-20_12-00';
 })();
 
 /** URL del Apps Script NUEVO (abajo tenés el código del backend) */
-const API = 'PASTE_AQUI_TU_NUEVA_WEBAPP_URL';
+const API = 'https://script.google.com/macros/s/AKfycby6SzAgXhtctDbYEGETB6Ku8X_atugp7Mld5QvimnDpXMmHU9IxW9XRqDkRI0rGONr85Q/exec';
 
 /** Encabezados oficiales del Sheet (NO los cambiamos) */
 const HEADERS_REQUIRED = [
