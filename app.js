@@ -1,9 +1,9 @@
 // === CONFIG ===
-const API = 'https://script.google.com/macros/s/AKfycbwqmOI-R_htTcfnaFrdI8943665CCLHYWr29GiSTw8qaAwzyXsKx4WXpJ2WtqQVWTq5IQ/exec'; // <-- pegá acá tu Web App de la hoja Stock
-const CACHE_KEY = 'stock_cache_v5';           // nueva versión de caché para no mezclar datos viejos
-const CACHE_TTL_MIN = 15;                     // minutos
+const API = 'https://script.google.com/macros/s/AKfycbwqmOI-R_htTcfnaFrdI8943665CCLHYWr29GiSTw8qaAwzyXsKx4WXpJ2WtqQVWTq5IQ/exec';
+const CACHE_KEY = 'stock_cache_v7';
+const CACHE_TTL_MIN = 15; // minutos
 
-// Traduce los encabezados del Sheet a las claves que usa la UI
+// Traduce encabezados del Sheet a claves internas
 const MAP = {
   'N ANTEOJO': 'n_anteojo',
   'MARCA': 'marca',
@@ -25,7 +25,7 @@ const MAP = {
 };
 
 // === HELPERS ===
-const $ = (sel) => document.querySelector(sel);
+const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 function formatMoney(v){
@@ -39,8 +39,7 @@ function toDate(s){
   if (/\d{2}\/\d{2}\/\d{2,4}/.test(s)) {
     const [d,m,y] = s.split('/');
     const yy = y.length===2 ? '20'+y : y;
-    const iso = `${yy}-${m}-${d}`;
-    const dt = new Date(iso);
+    const dt = new Date(`${yy}-${m}-${d}`);
     return isNaN(dt) ? null : dt;
   }
   const d = new Date(s);
@@ -50,42 +49,35 @@ function formatShortDate(s){
   const d = toDate(s);
   return d ? d.toLocaleDateString('es-AR') : '';
 }
-function debounce(fn, ms=250){
-  let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); };
-}
-function setStatus(msg, color){
-  const el = $('#status'); if (!el) return;
-  el.textContent = msg || '';
-  el.style.color = color || 'inherit';
-}
-function setLastSync(ts){
-  const el = $('#lastSync'); if (!el) return;
-  if (!ts) { el.textContent=''; return; }
-  const d = new Date(ts);
-  el.textContent = `Actualizado: ${d.toLocaleString('es-AR')}`;
-}
-function normHeader(h){
-  return String(h||'')
-    .trim()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // sin tildes
-    .toUpperCase();
-}
-// --- CONTROL DE CARGA (evita spinner pegado) ---
+function debounce(fn, ms=250){ let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); }; }
+function setStatus(msg, color){ const el=$('#status'); if (!el) return; el.textContent=msg||''; el.style.color=color||'var(--accent)'; }
+function setLastSync(ts){ const el=$('#lastSync'); if(!el) return; el.textContent = ts ? `Actualizado: ${new Date(ts).toLocaleString('es-AR')}` : ''; }
+function normHeader(h){ return String(h||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase(); }
+function norm(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+
+// --- CONTROL DE CARGA (spinner sólido) ---
 let LOADING = 0;
 function setLoading(on){
+  const sp = $('#spinner'); if (!sp) return;
   LOADING = Math.max(0, LOADING + (on ? 1 : -1));
-  const sp = document.getElementById('spinner');
-  if (sp) sp.hidden = (LOADING === 0);
+  const show = LOADING > 0;
+  sp.hidden = !show;
+  if (show) sp.classList.add('show'); else sp.classList.remove('show');
 }
-// por si algo falla en background, auto-ocultá a los 12s
-function loadingFailsafe(){
-  setTimeout(()=>{ LOADING = 0; const sp = document.getElementById('spinner'); if (sp) sp.hidden = true; }, 12000);
-}
+function hideSpinnerNow(){ LOADING=0; const sp=$('#spinner'); if(sp){ sp.hidden=true; sp.classList.remove('show'); } }
+function loadingFailsafe(){ setTimeout(()=>hideSpinnerNow(), 12000); }
 
 // === ESTADO ===
 let DATA = [];
 let sortKey = 'n_anteojo';
 let sortDir = 'asc';
+
+// === INDEX DE BUSQUEDA (para tokens AND) ===
+function buildIndex(arr){
+  arr.forEach(r=>{
+    r.__q = norm([r.n_anteojo, r.marca, r.modelo, r.color, r.familia, r.cristal_color, r.calibre, r.codigo_barras].join(' '));
+  });
+}
 
 // === RENDER ===
 function render(rows){
@@ -94,6 +86,7 @@ function render(rows){
   if (!rows.length){
     $('#empty').hidden = false;
     $('#count').textContent = '0 resultados';
+    hideSpinnerNow();
     return;
   }
   $('#empty').hidden = true;
@@ -119,6 +112,7 @@ function render(rows){
     frag.appendChild(tr);
   });
   tbody.appendChild(frag);
+  hideSpinnerNow();
 }
 
 // === ORDEN ===
@@ -128,9 +122,7 @@ function sortRows(rows, key, dir='asc'){
     const va = (a[key] ?? '').toString().toLowerCase();
     const vb = (b[key] ?? '').toString().toLowerCase();
     if (key==='n_anteojo' || key==='calibre' || key==='precio'){
-      const na = Number(a[key]) || 0;
-      const nb = Number(b[key]) || 0;
-      return (na-nb)*mult;
+      const na = Number(a[key]) || 0; const nb = Number(b[key]) || 0; return (na-nb)*mult;
     }
     if (key==='fecha_ingreso' || key==='fecha_venta'){
       const da = toDate(a[key]) ? toDate(a[key]).getTime() : 0;
@@ -145,27 +137,24 @@ function sortRows(rows, key, dir='asc'){
 
 // === FILTRO ===
 function filterRows(){
-  setLoading(false); // si quedó pegado, lo baja
-  const q = $('#q').value.trim().toLowerCase();
+  hideSpinnerNow(); // si quedó pegado por un fetch en background
+  const q = $('#q').value.trim();
   const fam = $('#familia').value;
-  const estado = $('#estadoVenta').value; // DISPONIBLE / VENDIDO
+  const estado = $('#estadoVenta').value;
 
   let rows = DATA;
 
   if (q){
-    rows = rows.filter(r=>{
-      return String(r.n_anteojo ?? '').toLowerCase().includes(q)
-          || String(r.marca ?? '').toLowerCase().includes(q)
-          || String(r.modelo ?? '').toLowerCase().includes(q)
-          || String(r.color ?? '').toLowerCase().includes(q)
-          || String(r.codigo_barras ?? '').toLowerCase().includes(q);
-    });
+    const tokens = q.split(/\s+/).map(norm).filter(Boolean);
+    if (tokens.length){
+      rows = rows.filter(r=>{
+        const hay = r.__q || (r.__q = norm([r.n_anteojo, r.marca, r.modelo, r.color, r.familia, r.cristal_color, r.calibre, r.codigo_barras].join(' ')));
+        return tokens.every(t => hay.includes(t)); // AND
+      });
+    }
   }
 
-  if (fam){
-    rows = rows.filter(r=> (r.familia || '').toUpperCase()===fam);
-  }
-
+  if (fam){ rows = rows.filter(r=> (r.familia || '').toUpperCase()===fam); }
   if (estado){
     if (estado==='DISPONIBLE') rows = rows.filter(r=> !r.fecha_venta);
     if (estado==='VENDIDO')    rows = rows.filter(r=> !!r.fecha_venta);
@@ -186,19 +175,15 @@ function getCache(){
     return obj;
   }catch{ return null; }
 }
-function setCache(data){
-  localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
-}
-function clearCacheAndReload(){
-  localStorage.removeItem(CACHE_KEY);
-  fetchAll();
-}
+function setCache(data){ localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); }
+function clearCacheAndReload(){ localStorage.removeItem(CACHE_KEY); fetchAll(); }
 
 // === FETCH ===
+let FETCHING = false;
 async function fetchAll(){
-  setLoading(true);
-setStatus('Cargando…');
-loadingFailsafe();
+  if (FETCHING) return;
+  FETCHING = true;
+  setLoading(true); setStatus('Cargando…'); loadingFailsafe();
 
   try{
     const res = await fetch(`${API}?todos=true`, { method:'GET' });
@@ -209,14 +194,11 @@ loadingFailsafe();
     if (json && Array.isArray(json.rows)) {
       const headers = (json.headers || []).map(h => String(h||'').trim());
       const dynamicMap = {};
-      headers.forEach(h=>{
-        const k = normHeader(h);
-        if (MAP[k]) dynamicMap[h] = MAP[k];
-      });
+      headers.forEach(h=>{ const k = normHeader(h); if (MAP[k]) dynamicMap[h] = MAP[k]; });
 
       rows = json.rows.map(r=>{
-        const rec = (r && typeof r === 'object' && !Array.isArray(r)) ? r :
-                    (Array.isArray(r) ? Object.fromEntries(headers.map((h,i)=>[h, r[i]])) : {});
+        const rec = (r && typeof r === 'object' && !Array.isArray(r)) ? r
+                 : (Array.isArray(r) ? Object.fromEntries(headers.map((h,i)=>[h, r[i]])) : {});
         const o = {};
         Object.keys(rec).forEach(h=>{
           const key = dynamicMap[h] || MAP[normHeader(h)] || null;
@@ -225,23 +207,19 @@ loadingFailsafe();
         return o;
       });
     } else if (Array.isArray(json)) {
-      rows = json; // compat
-    } else {
-      throw new Error('Forma de respuesta inesperada');
-    }
+      rows = json;
+    } else { throw new Error('Forma de respuesta inesperada'); }
 
-    // Mostrar SOLO filas válidas de la hoja Stock
+    // Filas válidas de Stock
     rows = rows.filter(r => {
       const nOk = /\d/.test(String(r.n_anteojo || '').trim());
       const infoOk = (r.marca || r.modelo || r.color || r.codigo_barras);
       return nOk || infoOk;
     });
 
-    // Orden inicial por N°
-    sortKey = 'n_anteojo';
-    sortDir = 'asc';
-
+    sortKey = 'n_anteojo'; sortDir = 'asc';
     DATA = rows;
+    buildIndex(DATA);
     setCache(DATA);
     setLastSync(Date.now());
     setStatus('Listo', 'var(--accent)');
@@ -249,37 +227,27 @@ loadingFailsafe();
     console.error('fetchAll error:', e);
     setStatus('Error al cargar. Uso copia local si existe.', 'var(--danger)');
     const cached = getCache();
-    if (cached){
-      DATA = cached.data;
-      setLastSync(cached.ts);
-    }else{
-      DATA = [];
-    }
+    if (cached){ DATA = cached.data; setLastSync(cached.ts); } else { DATA = []; }
   }finally{
+    FETCHING = false;
     setLoading(false);
-filterRows();
-
+    filterRows();
   }
 }
 
 // === INIT ===
 function attachEvents(){
-  $('#q').addEventListener('input', debounce(filterRows, 200));
+  $('#q').addEventListener('input', debounce(filterRows, 180));
   $('#familia').addEventListener('change', filterRows);
   $('#estadoVenta').addEventListener('change', filterRows);
-  $('#clearBtn').addEventListener('click', ()=>{
-    $('#q').value=''; $('#familia').value=''; $('#estadoVenta').value='';
-    filterRows();
-  });
+  $('#clearBtn').addEventListener('click', ()=>{ $('#q').value=''; $('#familia').value=''; $('#estadoVenta').value=''; filterRows(); });
   $('#reloadBtn').addEventListener('click', ()=>{ fetchAll(); });
   $('#forceBtn').addEventListener('click', ()=>{ clearCacheAndReload(); });
 
-  // ordenar por encabezado
-  document.querySelectorAll('th[data-sort]').forEach(th=>{
+  $$('#tabla thead th[data-sort]').forEach(th=>{
     th.addEventListener('click', ()=>{
       const key = th.getAttribute('data-sort');
-      if (sortKey===key){ sortDir = (sortDir==='asc'?'desc':'asc'); }
-      else { sortKey=key; sortDir='asc'; }
+      if (sortKey===key){ sortDir = (sortDir==='asc'?'desc':'asc'); } else { sortKey=key; sortDir='asc'; }
       filterRows();
     });
   });
@@ -288,13 +256,6 @@ function attachEvents(){
 (function start(){
   attachEvents();
   const cached = getCache();
-  if (cached){
-    DATA = cached.data;
-    setLastSync(cached.ts);
-    filterRows();
-    // refresco en background
-    fetchAll();
-  }else{
-    fetchAll();
-  }
+  if (cached){ DATA = cached.data; buildIndex(DATA); setLastSync(cached.ts); filterRows(); fetchAll(); }
+  else { fetchAll(); }
 })();
