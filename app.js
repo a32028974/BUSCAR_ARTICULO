@@ -1,7 +1,7 @@
 /* ===== Versión (debe coincidir con index.html) ===== */
-const APP_VERSION = '2025-08-20_11-05';
+const APP_VERSION = '2025-08-20_13-20';
 
-// Limpieza automática de cachés locales si cambió la versión
+// Limpieza automática de caches locales si cambió la versión
 (() => {
   const last = localStorage.getItem('APP_VERSION');
   if (last !== APP_VERSION) {
@@ -11,40 +11,37 @@ const APP_VERSION = '2025-08-20_11-05';
   }
 })();
 
-/** URL del Apps Script NUEVO (abajo tenés el código del backend) */
-const API = 'https://script.google.com/macros/s/AKfycby6SzAgXhtctDbYEGETB6Ku8X_atugp7Mld5QvimnDpXMmHU9IxW9XRqDkRI0rGONr85Q/exec';
+/** URL de tu WebApp (tu Apps Script actual, NO lo cambiamos) */
+const API = 'https://script.google.com/macros/s/AKfycbye3RORWk2HZFBdKayrKXKMM1jACMg14YZPIhxXNVo-yuLMlYpIsQAuCIWh2IlZLRF2ZA/exec';
 
-/** Encabezados oficiales del Sheet (NO los cambiamos) */
+/** Encabezados oficiales de la hoja (exactos) */
 const HEADERS_REQUIRED = [
   'N ANTEOJO','MARCA','MODELO','COLOR','ARMAZON','CALIBRE','CRISTAL',
-  'FAMILIA','PRECIO PUBLICO','FECHA INGRESO','FECHA DE VENTA','VENDEDOR',
-  'COSTO','CODIGO DE BARRAS','OBSERVACIONES','FÁBRICA'
+  'FAMILIA','PRECIO PUBLICO','FECHA INGRESO','FECHA DE VENTA','VENDEDOR'
 ];
 
-/** Orden visual (12 columnas que mostramos) */
+/** Orden visual que mostramos (12 columnas) */
 const DISPLAY_ORDER = [
   'N ANTEOJO','MARCA','MODELO','COLOR','ARMAZON','CALIBRE',
   'CRISTAL','FAMILIA','PRECIO PUBLICO','FECHA DE VENTA','VENDEDOR','FECHA INGRESO'
 ];
 
-let stockLocal = []; // siempre arrays
-let headerIndex = {}; // nombre -> índice
+let stockLocal = [];      // array de objetos { 'N ANTEOJO':..., ... }
+let headersActuales = []; // headers devueltos por API (para validar)
 
-/* -------- Utils -------- */
+/* ---------- Utils ---------- */
 const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toUpperCase();
-function buildIndex(headers){
-  headerIndex = {};
-  headers.forEach((h,i)=>{ headerIndex[norm(h)] = i; });
-
-  // validar requeridas
-  for (const name of HEADERS_REQUIRED){
-    if (!(norm(name) in headerIndex)) {
-      throw new Error(`Falta la columna requerida: "${name}" en la hoja (headers recibidos: ${headers.join(', ')})`);
+function ensureHeaders(headers){
+  headersActuales = headers || [];
+  for (const name of HEADERS_REQUIRED) {
+    if (!headersActuales.includes(name)) {
+      throw new Error(`Falta la columna requerida: "${name}". Revisá los encabezados de la hoja.`);
     }
   }
 }
-function fmtDate(v){
+function fmtFecha(v){
   if (!v) return '';
+  // Tu API ya formatea Date -> "dd/MM/yy", igual soportamos otros formatos
   const d = new Date(v);
   if (!isNaN(d)) {
     const dd = String(d.getDate()).padStart(2,'0');
@@ -54,58 +51,43 @@ function fmtDate(v){
   }
   if (typeof v === 'string' && /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(v)) {
     const [dd,mm,yy] = v.split('/');
-    const full = yy.length === 2 ? ('20'+yy) : yy;
-    return `${dd.padStart(2,'0')}-${mm.padStart(2,'0')}-${full}`;
+    const Y = yy.length === 2 ? '20'+yy : yy;
+    return `${dd.padStart(2,'0')}-${mm.padStart(2,'0')}-${Y}`;
   }
   return String(v);
 }
 
-/* -------- API wrappers (sin caché) -------- */
-async function apiTodos() {
-  const r = await fetch(`${API}?todos=1`, { cache: 'no-store' });
+/* ---------- API wrappers ---------- */
+// Devuelve { ok, headers, rows, updatedAt } con filas como OBJETOS
+async function apiTodos(n = ''){
+  const url = n ? `${API}?todos=true&n=${encodeURIComponent(n)}` : `${API}?todos=true`;
+  const r = await fetch(url, { cache: 'no-store' });
   const j = await r.json();
-  if (!j || !j.ok) throw new Error(j && j.error || 'Error API');
+  if (!j || !j.ok) throw new Error(j?.error || 'Error API');
   if (!Array.isArray(j.headers) || !Array.isArray(j.rows)) throw new Error('Respuesta inválida');
-  buildIndex(j.headers);
-  return j; // { ok, headers, rows, updatedAt }
-}
-async function apiBuscarNumero(n) {
-  const r = await fetch(`${API}?n=${encodeURIComponent(n)}`, { cache: 'no-store' });
-  const j = await r.json();
-  if (!j || !j.ok) throw new Error(j && j.error || 'Error API');
-  if (!Array.isArray(j.headers) || !Array.isArray(j.rows)) throw new Error('Respuesta inválida');
-  buildIndex(j.headers);
-  return j;
-}
-async function apiBuscarTexto(q) {
-  const r = await fetch(`${API}?q=${encodeURIComponent(q)}`, { cache: 'no-store' });
-  const j = await r.json();
-  if (!j || !j.ok) throw new Error(j && j.error || 'Error API');
-  if (!Array.isArray(j.headers) || !Array.isArray(j.rows)) throw new Error('Respuesta inválida');
-  buildIndex(j.headers);
+  ensureHeaders(j.headers);
   return j;
 }
 
-/* -------- Render -------- */
+/* ---------- Render ---------- */
 function render(rows){
   const tbody = document.getElementById('contenido');
   tbody.innerHTML = '';
 
-  const get = (row, name) => row[ headerIndex[norm(name)] ];
-
   rows.forEach(row => {
     const tr = document.createElement('tr');
 
+    // checkbox con id = N ANTEOJO
     const tdCheck = document.createElement('td');
     const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=true;
-    ck.dataset.id = get(row, 'N ANTEOJO');
+    ck.dataset.id = row['N ANTEOJO'] ?? '';
     tdCheck.appendChild(ck); tr.appendChild(tdCheck);
 
     DISPLAY_ORDER.forEach(name => {
       const td = document.createElement('td');
-      let val = get(row, name);
-      if (name === 'FECHA DE VENTA' || name === 'FECHA DE INGRESO') val = fmtDate(val) || '-';
-      td.textContent = (val == null || val === '') ? '-' : String(val);
+      let val = row[name];
+      const isFecha = (name === 'FECHA DE VENTA' || name === 'FECHA DE INGRESO');
+      td.textContent = (val == null || val === '') ? '-' : (isFecha ? fmtFecha(val) : String(val));
       tr.appendChild(td);
     });
 
@@ -129,11 +111,11 @@ function ordenarPor(indiceVisual){
   ordenAsc=!ordenAsc; filas.forEach(f=>tbody.appendChild(f));
 }
 
-/* -------- Acciones UI -------- */
+/* ---------- Acciones UI ---------- */
 async function actualizarStock(){
   document.getElementById('spinner').style.display = 'block';
   try{
-    const data = await apiTodos(); // {headers, rows, updatedAt}
+    const data = await apiTodos(); // todo el stock como objetos
     stockLocal = data.rows;
     localStorage.setItem('stock', JSON.stringify(stockLocal));
     localStorage.setItem('headers', JSON.stringify(data.headers));
@@ -152,6 +134,7 @@ async function buscarAnteojo(){
   const input = document.getElementById('codigo');
   const q = String(input.value||'').trim();
   const avanzada = document.getElementById('busquedaAvanzada').checked;
+
   if (!q) { Swal.fire('Ingresá un número o texto'); return; }
 
   const inicio = performance.now();
@@ -160,20 +143,36 @@ async function buscarAnteojo(){
   document.getElementById('cantidadResultados').textContent='';
 
   try{
-    let data;
-    if (!avanzada && /^\d+$/.test(q) && stockLocal.length) {
-      // usar cache local si coincide exacto por número
-      const headers = JSON.parse(localStorage.getItem('headers')||'[]');
-      buildIndex(headers);
-      const idxNum = headerIndex[norm('N ANTEOJO')];
-      const res = stockLocal.filter(r => String(r[idxNum]).replace(/\D+/g,'') === q);
-      data = { rows: res, headers };
+    let rows = [];
+
+    if (/^\d+$/.test(q) && !avanzada) {
+      // número exacto: pedimos al backend ya filtrado
+      const data = await apiTodos(q);
+      rows = data.rows;
+      // cacheamos por si querés seguir buscando
+      localStorage.setItem('stock', JSON.stringify(rows));
+      localStorage.setItem('headers', JSON.stringify(data.headers));
     } else {
-      // ir a la API con headers garantizados
-      data = /^\d+$/.test(q) ? await apiBuscarNumero(q) : await apiBuscarTexto(q);
+      // texto o búsqueda avanzada: uso cache si existe, sino bajo todo y filtro
+      if (!stockLocal.length) {
+        const data = await apiTodos();
+        stockLocal = data.rows;
+        localStorage.setItem('stock', JSON.stringify(stockLocal));
+        localStorage.setItem('headers', JSON.stringify(data.headers));
+      }
+      const hay = (obj, k) => (obj[k] ?? '').toString().toLowerCase();
+      const ql = q.toLowerCase();
+      rows = stockLocal.filter(r =>
+        hay(r,'MARCA').includes(ql)   ||
+        hay(r,'MODELO').includes(ql)  ||
+        hay(r,'COLOR').includes(ql)   ||
+        hay(r,'ARMAZON').includes(ql) ||
+        hay(r,'FAMILIA').includes(ql) ||
+        hay(r,'CRISTAL').includes(ql) ||
+        String(r['N ANTEOJO']||'').includes(ql)
+      );
     }
 
-    const rows = Array.isArray(data.rows) ? data.rows : [];
     if (!rows.length){
       document.getElementById('resultado').style.display='none';
       document.getElementById('cantidadResultados').textContent='No se encontraron resultados.';
@@ -186,8 +185,8 @@ async function buscarAnteojo(){
     Swal.fire('❌ '+e.message);
   }finally{
     document.getElementById('spinner').style.display='none';
-    const t = (performance.now()).toFixed(2);
-    document.getElementById('tiempoBusqueda').textContent = `⏱ Tiempo de búsqueda: ${t} ms`;
+    const t=(performance.now()-inicio).toFixed(2);
+    document.getElementById('tiempoBusqueda').textContent=`⏱ Tiempo de búsqueda: ${t} ms`;
   }
 }
 
@@ -201,6 +200,7 @@ function limpiar(){
   document.getElementById('codigo').focus();
 }
 
+/* ---------- Exponer funciones a HTML ---------- */
 window.buscarAnteojo = buscarAnteojo;
 window.actualizarStock = actualizarStock;
 window.ordenarPor = ordenarPor;
@@ -209,16 +209,17 @@ window.limpiar = limpiar;
 window.onload = () => {
   document.getElementById('codigo').focus();
 
-  const headers = localStorage.getItem('headers');
-  const stock   = localStorage.getItem('stock');
-  if (headers && stock){
-    try{
-      buildIndex(JSON.parse(headers));
-      stockLocal = JSON.parse(stock);
-      document.getElementById('ultimaActualizacion').textContent =
-        'Base de datos actualizada: (cache local)';
-    }catch{}
-  }
+  // restaurar cache si lo hay
+  try{
+    const h = localStorage.getItem('headers');
+    const s = localStorage.getItem('stock');
+    if (h && s) {
+      headersActuales = JSON.parse(h);
+      ensureHeaders(headersActuales);
+      stockLocal = JSON.parse(s);
+      document.getElementById('ultimaActualizacion').textContent = 'Base de datos actualizada: (cache local)';
+    }
+  }catch{}
 
   document.getElementById('codigo').addEventListener('keydown', e=>{
     if (e.key === 'Enter'){ e.preventDefault(); buscarAnteojo(); }
