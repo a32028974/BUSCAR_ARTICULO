@@ -32,7 +32,7 @@
 
 <h2>
   <img src="logo_muy_chico_sinfondo.png" alt="Óptica Cristal" style="height:24px;vertical-align:middle;margin-right:8px;">
-  Número de anteojo v2
+  Número de anteojo v3
 </h2>
 
 <input type="text" id="codigo" placeholder="Buscar por número o palabras clave" />
@@ -73,9 +73,9 @@
 
 <div id="ultimaActualizacion"></div>
 
-<!-- Cargador con versión para cache-busting -->
+<!-- Carga del JS con versión (cache-busting) -->
 <script>
-  const APP_VERSION = '2025-08-20_11-05';  // <- cambiá esto cuando publiques
+  const APP_VERSION = '2025-08-20_13-20';
   const s = document.createElement('script');
   s.src = `./app.js?v=${encodeURIComponent(APP_VERSION)}`;
   s.defer = true;
