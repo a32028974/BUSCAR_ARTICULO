@@ -162,14 +162,34 @@ async function fetchAll(){
     const res = await fetch(`${API}?todos=true`, { method:'GET' });
     if (!res.ok) throw new Error('HTTP '+res.status);
     const json = await res.json();
-    // Esperamos un array de objetos con estas claves:
-    // n_anteojo, marca, modelo, color, familia, cristal_color, calibre, precio, costo, fecha_ingreso, fecha_venta, vendedor, codigo_barras, observaciones
-    if (!Array.isArray(json)) throw new Error('Respuesta inesperada');
-    DATA = json;
+
+    // Tu Apps Script retorna { ok, headers, rows, ... }
+    let rows = [];
+    if (Array.isArray(json)) {
+      // caso antiguo (no aplica acá), pero lo tolero
+      rows = json;
+    } else if (json && Array.isArray(json.rows)) {
+      const headers = json.headers || [];
+      // rows = array de objetos con claves EXACTAS de encabezado; mapeo a las claves internas
+      rows = json.rows.map(r => {
+        const o = {};
+        // cada r ya viene como objeto { 'N ANTEOJO':..., 'MARCA': ... }
+        Object.keys(r).forEach(h => {
+          const key = MAP[h?.toString().trim().toUpperCase()];
+          if (key) o[key] = r[h];
+        });
+        return o;
+      });
+    } else {
+      throw new Error('Forma de respuesta inesperada');
+    }
+
+    DATA = rows;
     setCache(DATA);
     setLastSync(Date.now());
     setStatus('Listo', 'var(--accent)');
   }catch(e){
+    console.error('fetchAll error:', e);
     setStatus('Error al cargar. Uso copia local si existe.', 'var(--danger)');
     const cached = getCache();
     if (cached){
@@ -183,6 +203,7 @@ async function fetchAll(){
     filterRows();
   }
 }
+
 
 // === INIT ===
 function attachEvents(){
