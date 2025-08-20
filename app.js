@@ -25,6 +25,8 @@ const MAP = {
 };
 
 // === HELPERS ===
+function onlyDigits(s){ return String(s||'').replace(/\D+/g,''); }
+
 const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -166,32 +168,75 @@ function sortRows(rows, key, dir='asc'){
 // === FILTRO ===
 function filterRows(){
   hideSpinnerNow();
-  const q = $('#q').value.trim();
+  const qraw = $('#q').value.trim();
   const fam = $('#familia').value;
   const estado = $('#estadoVenta').value;
 
   let rows = DATA;
-  let tokensRaw = [];
 
-  if (q){
-    tokensRaw = q.split(/\s+/).filter(Boolean);
-    const tokens = tokensRaw.map(norm);
-    if (tokens.length){
-      rows = rows.filter(r=>{
-        const hay = r.__q || (r.__q = norm([r.n_anteojo, r.marca, r.modelo, r.color, r.familia, r.cristal_color, r.calibre, r.codigo_barras].join(' ')));
-        return tokens.every(t => hay.includes(t)); // AND
-      });
+  // --- parsing de búsqueda avanzada ---
+  // partimos en tokens pero preservando lo que esté "entre comillas"
+  // ej:  @123  "123"  rayban  negro  54
+  const parts = qraw ? (qraw.match(/"[^"]+"|\S+/g) || []) : [];
+
+  const exactNums = [];     // números exactos por @123, #123 o "123"
+  const freeTokens = [];    // tokens normales (AND)
+  const highlightTokens = []; // para resaltar (sin @/#/comillas)
+
+  for (const p of parts){
+    const s = p.trim();
+
+    // "@123" o "#123"
+    let m = s.match(/^[#@](\d+)$/);
+    if (m){
+      exactNums.push(m[1]);
+      highlightTokens.push(m[1]);
+      continue;
     }
+
+    // `"123"` (solo si son dígitos dentro de comillas)
+    m = s.match(/^"(\d+)"$/);
+    if (m){
+      exactNums.push(m[1]);
+      highlightTokens.push(m[1]);
+      continue;
+    }
+
+    // token normal
+    freeTokens.push(s);
+    highlightTokens.push(s.replace(/^["']|["']$/g,'')); // por si vienen comillas sueltas
   }
 
+  // 1) filtro por N° exacto (si lo pediste)
+  if (exactNums.length){
+    rows = rows.filter(r=>{
+      const n = onlyDigits(r.n_anteojo);
+      return exactNums.every(x => onlyDigits(x) === n);
+    });
+  }
+
+  // 2) búsqueda por palabras (AND) normal
+  if (freeTokens.length){
+    const tokens = freeTokens.map(norm).filter(Boolean);
+    rows = rows.filter(r=>{
+      const hay = r.__q || (r.__q = norm([
+        r.n_anteojo, r.marca, r.modelo, r.color,
+        r.familia, r.cristal_color, r.calibre, r.codigo_barras
+      ].join(' ')));
+      return tokens.every(t => hay.includes(t));
+    });
+  }
+
+  // 3) filtros extra
   if (fam){ rows = rows.filter(r=> (r.familia || '').toUpperCase()===fam); }
   if (estado){
     if (estado==='DISPONIBLE') rows = rows.filter(r=> !r.fecha_venta);
     if (estado==='VENDIDO')    rows = rows.filter(r=> !!r.fecha_venta);
   }
 
+  // orden + render (con resaltado)
   rows = sortRows(rows, sortKey, sortDir);
-  render(rows, tokensRaw);
+  render(rows, highlightTokens);
 }
 
 // === CACHE ===
