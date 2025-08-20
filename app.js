@@ -3,6 +3,27 @@ const API = 'https://script.google.com/macros/s/AKfycby6SzAgXhtctDbYEGETB6Ku8X_a
 const CACHE_KEY = 'stock_cache_v1';
 const CACHE_TTL_MIN = 15; // minutos
 
+// Traduce los encabezados del Sheet a las claves que usa la UI
+const MAP = {
+  'N ANTEOJO': 'n_anteojo',
+  'MARCA': 'marca',
+  'MODELO': 'modelo',
+  'COLOR': 'color',
+  'FAMILIA': 'familia',
+  'CRISTAL': 'cristal_color',        // tu script usa "CRISTAL"
+  'COLOR CRISTAL': 'cristal_color',   // por si viene así
+  'CALIBRE': 'calibre',
+  'PRECIO PUBLICO': 'precio',
+  'FECHA INGRESO': 'fecha_ingreso',
+  'FECHA DE VENTA': 'fecha_venta',
+  'VENDEDOR': 'vendedor',
+  'CODIGO DE BARRAS': 'codigo_barras',
+  'OBSERVACIONES': 'observaciones',
+  'ARMAZON': 'armazon',               // opcional, no lo muestro en tabla
+  'FÁBRICA': 'fabrica',
+  'FABRICA': 'fabrica'
+};
+
 // === HELPERS ===
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
